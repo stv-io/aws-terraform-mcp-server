@@ -1,0 +1,12 @@
+{
+  "name": "AWS Terraform MCP Server",
+  "command": "docker",
+  "args": [
+    "run", "--rm", "--interactive",
+    "--env", "FASTMCP_LOG_LEVEL=ERROR",
+    "ghcr.io/stv-io/aws-terraform-mcp-server:latest"
+  ],
+  "env": {},
+  "disabled": false,
+  "autoApprove": []
+}
