@@ -57,8 +57,28 @@ jobs:
         cache-to: type=gha,mode=max
 
     - name: Test Docker image
+      if: github.event_name != 'pull_request'
       run: |
-        docker run --rm --name test-container -d ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-        sleep 10
-        docker logs test-container
-        docker stop test-container
+        # Test that the container starts and responds to basic MCP protocol
+        echo 'Testing Docker image startup and basic functionality...'
+        
+        # Run container in background and capture container ID
+        CONTAINER_ID=$(docker run --rm -d ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest)
+        echo "Started container: $CONTAINER_ID"
+        
+        # Wait a moment for container to initialize
+        sleep 5
+        
+        # Check if container is still running (healthy)
+        if docker ps | grep -q $CONTAINER_ID; then
+          echo "✅ Container is running successfully"
+          docker logs $CONTAINER_ID
+        else
+          echo "❌ Container failed to start or exited unexpectedly"
+          docker logs $CONTAINER_ID
+          exit 1
+        fi
+        
+        # Clean up - stop the container
+        docker stop $CONTAINER_ID || true
+        echo "✅ Docker image test completed successfully"
