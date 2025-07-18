@@ -1,10 +1,9 @@
-name: Build and Publish Docker Image
+name: Build and Test Docker Image
 
 on:
-  push:
-    branches: [ main ]
-    tags: [ 'v*' ]
   pull_request:
+    branches: [ main ]
+  push:
     branches: [ main ]
 
 env:
@@ -49,14 +48,14 @@ jobs:
       with:
         context: .
         platforms: linux/amd64,linux/arm64
-        push: ${{ github.event_name != 'pull_request' }}
+        push: ${{ github.ref == 'refs/heads/main' }}
         tags: ${{ steps.meta.outputs.tags }}
         labels: ${{ steps.meta.outputs.labels }}
         cache-from: type=gha
         cache-to: type=gha,mode=max
 
     - name: Test Docker image
-      if: github.event_name != 'pull_request'
+      if: github.ref == 'refs/heads/main'
       run: |
         # Test the MCP server using our existing test script
         echo '🧪 Testing Docker image with MCP protocol validation...'

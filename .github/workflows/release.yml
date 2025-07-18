@@ -1,0 +1,191 @@
+name: Release and Tag
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      force_version:
+        description: 'Force a specific version (e.g., v1.2.3)'
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  determine-version:
+    runs-on: ubuntu-latest
+    outputs:
+      should_release: ${{ steps.version.outputs.should_release }}
+      current_version: ${{ steps.version.outputs.current_version }}
+      new_version: ${{ steps.version.outputs.new_version }}
+      bump_type: ${{ steps.version.outputs.bump_type }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Fetch all history for proper version analysis
+
+    - name: Determine version
+      id: version
+      run: |
+        if [ -n "${{ github.event.inputs.force_version }}" ]; then
+          echo "🏷️  Using forced version: ${{ github.event.inputs.force_version }}"
+          echo "current_version=$(git tag -l --sort=-version:refname | head -n1 || echo 'v0.0.0')" >> $GITHUB_OUTPUT
+          echo "new_version=${{ github.event.inputs.force_version }}" >> $GITHUB_OUTPUT
+          echo "bump_type=manual" >> $GITHUB_OUTPUT
+          echo "should_release=true" >> $GITHUB_OUTPUT
+        else
+          .github/scripts/version.sh
+        fi
+
+  release:
+    needs: determine-version
+    if: needs.determine-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Pull latest image for retagging
+      run: |
+        echo "🏷️  Pulling latest image to retag as ${{ needs.determine-version.outputs.new_version }}"
+        docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+    - name: Tag and push versioned image
+      run: |
+        NEW_VERSION="${{ needs.determine-version.outputs.new_version }}"
+        echo "🏷️  Tagging image as $NEW_VERSION"
+        
+        # Tag the image with the new version
+        docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$NEW_VERSION
+        
+        # Also tag with major and major.minor versions for convenience
+        MAJOR=$(echo $NEW_VERSION | sed 's/v\([0-9]*\)\..*/\1/')
+        MAJOR_MINOR=$(echo $NEW_VERSION | sed 's/v\([0-9]*\.[0-9]*\)\..*/\1/')
+        
+        docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v$MAJOR
+        docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v$MAJOR_MINOR
+        
+        # Push all tags
+        docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$NEW_VERSION
+        docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v$MAJOR
+        docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:v$MAJOR_MINOR
+        
+        echo "✅ Successfully pushed versioned images"
+
+    - name: Create Git tag
+      run: |
+        NEW_VERSION="${{ needs.determine-version.outputs.new_version }}"
+        echo "🏷️  Creating Git tag $NEW_VERSION"
+        
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        git tag -a $NEW_VERSION -m "Release $NEW_VERSION
+
+        Version bump: ${{ needs.determine-version.outputs.bump_type }}
+        Previous version: ${{ needs.determine-version.outputs.current_version }}
+        
+        This release was automatically created by GitHub Actions."
+        
+        git push origin $NEW_VERSION
+        echo "✅ Git tag created and pushed"
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        NEW_VERSION="${{ needs.determine-version.outputs.new_version }}"
+        PREV_VERSION="${{ needs.determine-version.outputs.current_version }}"
+        
+        echo "📝 Generating changelog from $PREV_VERSION to $NEW_VERSION"
+        
+        # Create changelog
+        cat > CHANGELOG.md << EOF
+        # Changelog for $NEW_VERSION
+        
+        **Version bump type:** ${{ needs.determine-version.outputs.bump_type }}
+        **Previous version:** $PREV_VERSION
+        
+        ## Changes
+        
+        EOF
+        
+        # Add commit messages since last tag
+        if [ "$PREV_VERSION" = "v0.0.0" ]; then
+          git log --pretty=format:"- %s (%h)" --no-merges >> CHANGELOG.md
+        else
+          git log $PREV_VERSION..HEAD --pretty=format:"- %s (%h)" --no-merges >> CHANGELOG.md
+        fi
+        
+        echo "" >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "## Docker Images" >> CHANGELOG.md
+        echo "" >> CHANGELOG.md
+        echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$NEW_VERSION\`" >> CHANGELOG.md
+        echo "- \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest\`" >> CHANGELOG.md
+        
+        # Set output for GitHub release
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        cat CHANGELOG.md >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ needs.determine-version.outputs.new_version }}
+        release_name: Release ${{ needs.determine-version.outputs.new_version }}
+        body: ${{ steps.changelog.outputs.changelog }}
+        draft: false
+        prerelease: false
+
+    - name: Update README badges
+      run: |
+        NEW_VERSION="${{ needs.determine-version.outputs.new_version }}"
+        echo "📝 Updating README with new version badges"
+        
+        # Update version badge in README if it exists
+        if grep -q "version-" README.md; then
+          sed -i "s/version-v[0-9]*\.[0-9]*\.[0-9]*/version-$NEW_VERSION/g" README.md
+        fi
+        
+        # Commit and push if there are changes
+        if ! git diff --quiet README.md; then
+          git add README.md
+          git commit -m "docs: update version badges to $NEW_VERSION [skip ci]"
+          git push
+        fi
+
+  notify:
+    needs: [determine-version, release]
+    if: always() && needs.determine-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Notify release status
+      run: |
+        if [ "${{ needs.release.result }}" = "success" ]; then
+          echo "🎉 Successfully released ${{ needs.determine-version.outputs.new_version }}"
+          echo "📦 Docker images available at:"
+          echo "   - ghcr.io/${{ github.repository }}:${{ needs.determine-version.outputs.new_version }}"
+          echo "   - ghcr.io/${{ github.repository }}:latest"
+        else
+          echo "❌ Release failed for ${{ needs.determine-version.outputs.new_version }}"
+          exit 1
+        fi

@@ -89,9 +89,26 @@ docker run --rm --interactive aws-terraform-mcp-server
 
 ### Testing
 
+#### Local Docker Testing
 ```bash
-# Run the test script
+# Test the locally built Docker image
 python3 test_docker_mcp.py
+
+# Test the published Docker image from GHCR
+sed 's|aws-terraform-mcp-server:latest|ghcr.io/stv-io/aws-terraform-mcp-server:latest|g' test_docker_mcp.py > test_published.py
+python3 test_published.py
+```
+
+#### Direct Server Testing (without Docker)
+```bash
+# Test the server directly using uv
+python3 test_mcp_server.py
+```
+
+#### Unit Tests
+```bash
+# Run the comprehensive test suite
+python3 -m pytest tests/ -v
 ```
 
 ### Using UV (Alternative)
@@ -121,6 +138,18 @@ For Docker usage:
 - **Review all Checkov warnings** and fix security issues when possible
 - **Use AWSCC provider** for consistent API behavior and better security defaults
 - **Conduct independent assessment** before applying changes to production environments
+
+## 🔄 Versioning
+
+This project uses [Semantic Versioning](https://semver.org/) with automated releases based on [Conventional Commits](https://www.conventionalcommits.org/).
+
+### Available Tags
+- `latest` - Latest stable release
+- `v1.2.3` - Specific version
+- `v1.2` - Latest patch of minor version  
+- `v1` - Latest minor of major version
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for commit message guidelines.
 
 ## 📄 License
 
