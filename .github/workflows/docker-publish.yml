@@ -62,7 +62,7 @@ jobs:
         echo '🧪 Testing Docker image with MCP protocol validation...'
         
         # Update the test script to use the CI image
-        sed 's/aws-terraform-mcp-server:latest/${{ env.REGISTRY }}\/${{ env.IMAGE_NAME }}:latest/g' test_docker_mcp.py > test_docker_mcp_ci.py
+        sed 's|aws-terraform-mcp-server:latest|${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest|g' test_docker_mcp.py > test_docker_mcp_ci.py
         
         # Run the MCP test
         echo '🔍 Running MCP protocol test...'
