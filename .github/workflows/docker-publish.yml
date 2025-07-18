@@ -58,80 +58,19 @@ jobs:
     - name: Test Docker image
       if: github.event_name != 'pull_request'
       run: |
-        # Test the MCP server by running it in interactive mode and testing externally
+        # Test the MCP server using our existing test script
         echo '🧪 Testing Docker image with MCP protocol validation...'
         
-        # Start container in interactive mode in background
-        echo '📦 Starting container in interactive mode...'
-        CONTAINER_ID=$(docker run --rm -i -d ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest)
-        echo "Started container: $CONTAINER_ID"
+        # Update the test script to use the CI image
+        sed 's/aws-terraform-mcp-server:latest/${{ env.REGISTRY }}\/${{ env.IMAGE_NAME }}:latest/g' test_docker_mcp.py > test_docker_mcp_ci.py
         
-        # Wait for container to initialize
-        sleep 3
-        
-        # Check if container is running
-        if ! docker ps | grep -q $CONTAINER_ID; then
-          echo "❌ Container failed to start or exited unexpectedly"
-          docker logs $CONTAINER_ID 2>/dev/null || true
+        # Run the MCP test
+        echo '🔍 Running MCP protocol test...'
+        if python3 test_docker_mcp_ci.py; then
+          echo "✅ MCP protocol test passed"
+        else
+          echo "❌ MCP protocol test failed"
           exit 1
         fi
         
-        echo "✅ Container is running in interactive mode"
-        
-        # Create and run a simple MCP test
-        echo '🔍 Testing MCP protocol communication...'
-        cat > test_mcp_ci.py << 'EOF'
-        import subprocess
-        import json
-        import sys
-        
-        def test_mcp_protocol():
-            try:
-                # Test MCP initialization
-                init_msg = {
-                    "jsonrpc": "2.0",
-                    "method": "initialize",
-                    "params": {
-                        "protocolVersion": "2024-11-05",
-                        "capabilities": {},
-                        "clientInfo": {"name": "ci-test", "version": "1.0.0"}
-                    },
-                    "id": 1
-                }
-                
-                # Send initialization message to container
-                result = subprocess.run([
-                    "docker", "exec", "-i", sys.argv[1]
-                ], input=json.dumps(init_msg) + "\n", 
-                   capture_output=True, text=True, timeout=10)
-                
-                if result.returncode == 0 and result.stdout:
-                    print("✅ MCP initialization successful")
-                    return True
-                else:
-                    print(f"❌ MCP initialization failed: {result.stderr}")
-                    return False
-                    
-            except Exception as e:
-                print(f"❌ Test error: {e}")
-                return False
-        
-        if __name__ == "__main__":
-            success = test_mcp_protocol()
-            sys.exit(0 if success else 1)
-        EOF
-        
-        # Run the MCP test
-        if python3 test_mcp_ci.py $CONTAINER_ID; then
-          echo "✅ MCP protocol test passed"
-        else
-          echo "⚠️  MCP protocol test had issues, but container is running"
-        fi
-        
-        # Show container logs for debugging
-        echo "📋 Container logs:"
-        docker logs $CONTAINER_ID 2>/dev/null || true
-        
-        # Clean up
-        docker stop $CONTAINER_ID || true
         echo "✅ Docker image test completed successfully"
